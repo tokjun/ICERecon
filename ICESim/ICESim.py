@@ -59,6 +59,15 @@ class ICESimParameterNode:
     inputSegmentation - The 3D segmentation of the heart chambers and vessels.
     imagingPlaneTransform - The linear transform representing the position and
         orientation of the imaging plane (attached to the ICE probe).
+    scanPlaneOrientation - "Perpendicular": the imaging plane is perpendicular
+        to the transform's third column vector (the catheter axis), i.e. the
+        catheter axis is the plane normal. "Parallel (forward)": the imaging
+        plane contains the catheter axis instead, extending forward from the
+        tip. "Parallel (side)": the "Parallel (forward)" plane rotated 90
+        degrees about the transform's second column vector (perpendicular
+        to the catheter), pivoting on the tip (the transform's fourth
+        column vector), so the near edge of the image runs along the
+        catheter.
     matrixSizeX - Number of pixels of the simulated image along X.
     matrixSizeY - Number of pixels of the simulated image along Y.
     pixelSpacingX - Pixel spacing of the simulated image along X (mm).
@@ -67,6 +76,7 @@ class ICESimParameterNode:
     """
     inputSegmentation: vtkMRMLSegmentationNode
     imagingPlaneTransform: vtkMRMLLinearTransformNode
+    scanPlaneOrientation: str = "Perpendicular"
     matrixSizeX: Annotated[int, WithinRange(16, 1024)] = 256
     matrixSizeY: Annotated[int, WithinRange(16, 1024)] = 256
     pixelSpacingX: Annotated[float, WithinRange(0.01, 10.0)] = 0.5
@@ -89,6 +99,7 @@ class ICESimWidget(ScriptedLoadableModuleWidget, VTKObservationMixin):
         self.logic = None
         self._parameterNode = None
         self._parameterNodeGuiTag = None
+        self._observedTransformNode = None
 
     def setup(self):
         ScriptedLoadableModuleWidget.setup(self)
@@ -115,6 +126,8 @@ class ICESimWidget(ScriptedLoadableModuleWidget, VTKObservationMixin):
             "currentNodeChanged(vtkMRMLNode*)", self.onImagingPlaneTransformChanged)
         self.ui.outputVolume.connect(
             "currentNodeChanged(vtkMRMLNode*)", self.onOutputVolumeChanged)
+        self.ui.scanPlaneOrientation.connect(
+            "currentTextChanged(QString)", self.onScanPlaneOrientationChanged)
 
         self.initializeParameterNode()
 
@@ -151,6 +164,40 @@ class ICESimWidget(ScriptedLoadableModuleWidget, VTKObservationMixin):
             self.ui.inputSegmentation.setCurrentNode(self._parameterNode.inputSegmentation)
             self.ui.imagingPlaneTransform.setCurrentNode(self._parameterNode.imagingPlaneTransform)
             self.ui.outputVolume.setCurrentNode(self._parameterNode.outputVolume)
+            self.ui.scanPlaneOrientation.setCurrentText(self._parameterNode.scanPlaneOrientation)
+            self._setObservedTransformNode(self._parameterNode.imagingPlaneTransform)
+        else:
+            self._setObservedTransformNode(None)
+
+    def _setObservedTransformNode(self, transformNode):
+        """Track TransformModifiedEvent on the imaging plane transform so the
+        output volume is regenerated whenever the probe pose changes."""
+        if self._observedTransformNode is not None:
+            self.removeObserver(
+                self._observedTransformNode,
+                slicer.vtkMRMLTransformNode.TransformModifiedEvent,
+                self.onImagingPlaneTransformModified)
+        self._observedTransformNode = transformNode
+        if self._observedTransformNode is not None:
+            self.addObserver(
+                self._observedTransformNode,
+                slicer.vtkMRMLTransformNode.TransformModifiedEvent,
+                self.onImagingPlaneTransformModified)
+
+    def onImagingPlaneTransformModified(self, caller, event):
+        self._autoUpdateOutputVolume()
+
+    def _autoUpdateOutputVolume(self):
+        if not self._parameterNode:
+            return
+        if not (self._parameterNode.inputSegmentation
+                and self._parameterNode.imagingPlaneTransform
+                and self._parameterNode.outputVolume):
+            return
+        try:
+            self.logic.process(self._parameterNode)
+        except Exception as e:
+            logging.error(f"ICESim: automatic update failed: {e}")
 
     def onInputSegmentationChanged(self, node):
         if self._parameterNode:
@@ -159,10 +206,15 @@ class ICESimWidget(ScriptedLoadableModuleWidget, VTKObservationMixin):
     def onImagingPlaneTransformChanged(self, node):
         if self._parameterNode:
             self._parameterNode.imagingPlaneTransform = node
+        self._setObservedTransformNode(node)
 
     def onOutputVolumeChanged(self, node):
         if self._parameterNode:
             self._parameterNode.outputVolume = node
+
+    def onScanPlaneOrientationChanged(self, text):
+        if self._parameterNode:
+            self._parameterNode.scanPlaneOrientation = text
 
     def onApplyButton(self):
         with slicer.util.tryWithErrorDisplay(_("Failed to compute results."), waitCursor=True):
@@ -213,7 +265,9 @@ class ICESimLogic(ScriptedLoadableModuleLogic):
         startTime = time.time()
         logging.info("ICESim processing started")
 
-        ijkToRAS = self._computeIJKToRAS(parameterNode.imagingPlaneTransform, sizeX, sizeY, spacingX, spacingY)
+        ijkToRAS = self._computeIJKToRAS(
+            parameterNode.imagingPlaneTransform, sizeX, sizeY, spacingX, spacingY,
+            parameterNode.scanPlaneOrientation)
         bloodPoolMask = self._resliceSegmentationToPlane(
             parameterNode.inputSegmentation, ijkToRAS, sizeX, sizeY)
         imageArray = self._renderUltrasoundImage(bloodPoolMask)
@@ -222,25 +276,54 @@ class ICESimLogic(ScriptedLoadableModuleLogic):
         logging.info(f"ICESim processing completed in {time.time() - startTime:.2f} seconds")
 
     @staticmethod
-    def _computeIJKToRAS(transformNode, sizeX, sizeY, spacingX, spacingY):
+    def _computeIJKToRAS(transformNode, sizeX, sizeY, spacingX, spacingY, orientation="Perpendicular"):
         """Build the IJK-to-RAS matrix of the simulated image.
 
-        The imaging plane's X/Y axes and origin are taken from the transform
-        node (Z is the plane normal). Row j=0 corresponds to the probe
-        (depth 0), with depth increasing along +Y; column i is centered
-        laterally around the transform's origin.
+        Row j=0 corresponds to the probe (depth 0), with depth increasing
+        along +j; column i is centered laterally around the transform's
+        origin (its fourth column vector, the catheter tip). Depending on
+        orientation:
+
+        - "Perpendicular" (default): the plane normal is the transform's
+          third column vector (the catheter axis), so the imaging plane is
+          a cross-section perpendicular to the catheter.
+          i = transform X, j = transform Y, k = transform Z.
+        - "Parallel (forward)": the imaging plane contains the catheter
+          axis instead, extending forward from the tip.
+          i = transform X, j = transform Z, k = transform Y.
+        - "Parallel (side)": the "Parallel (forward)" plane (i = transform
+          X, j = transform Z, k = transform Y) rotated 90 degrees about the
+          transform's second column vector (Y, perpendicular to the
+          catheter), pivoting on the tip: i = -transform Z, j = transform
+          X, k = transform Y (unchanged, since Y is the rotation axis).
+          Because depth (j) is now perpendicular to the catheter and row
+          j=0 is at the tip, the near edge of the image (row 0) runs along
+          the full length of the catheter axis rather than through a
+          single point on it.
         """
         transformToWorld = vtk.vtkMatrix4x4()
         transformNode.GetMatrixTransformToWorld(transformToWorld)
 
-        offset = vtk.vtkMatrix4x4()
-        offset.Identity()
-        offset.SetElement(0, 0, spacingX)
-        offset.SetElement(1, 1, spacingY)
-        offset.SetElement(0, 3, -((sizeX - 1) / 2.0) * spacingX)
+        xAxis = [transformToWorld.GetElement(r, 0) for r in range(3)]
+        yAxis = [transformToWorld.GetElement(r, 1) for r in range(3)]
+        zAxis = [transformToWorld.GetElement(r, 2) for r in range(3)]
+        origin = [transformToWorld.GetElement(r, 3) for r in range(3)]
 
+        if orientation == "Parallel (side)":
+            iAxis, jAxis, kAxis = [-c for c in zAxis], xAxis, yAxis
+        elif orientation == "Parallel (forward)":
+            iAxis, jAxis, kAxis = xAxis, zAxis, yAxis
+        else:
+            iAxis, jAxis, kAxis = xAxis, yAxis, zAxis
+
+        cx = (sizeX - 1) / 2.0
         ijkToRAS = vtk.vtkMatrix4x4()
-        vtk.vtkMatrix4x4.Multiply4x4(transformToWorld, offset, ijkToRAS)
+        ijkToRAS.Identity()
+        for r in range(3):
+            ijkToRAS.SetElement(r, 0, iAxis[r] * spacingX)
+            ijkToRAS.SetElement(r, 1, jAxis[r] * spacingY)
+            ijkToRAS.SetElement(r, 2, kAxis[r])
+            ijkToRAS.SetElement(r, 3, origin[r] - iAxis[r] * spacingX * cx)
         return ijkToRAS
 
     @staticmethod
