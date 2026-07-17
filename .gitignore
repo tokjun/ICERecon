@@ -1,0 +1,10 @@
+__pycache__/
+*.pyc
+
+# CMake / build output
+build/
+CMakeCache.txt
+CMakeFiles/
+
+# OS
+.DS_Store
