@@ -1,4 +1,5 @@
 import logging
+import math
 import os
 import time
 from typing import Annotated
@@ -68,6 +69,14 @@ class ICESimParameterNode:
         to the catheter), pivoting on the tip (the transform's fourth
         column vector), so the near edge of the image runs along the
         catheter.
+    viewAngleDeg - Full opening angle (degrees) of the fan-shaped imaging
+        area. The fan's apex is at the center of the image's near edge
+        (row 0, the catheter), opening symmetrically toward increasing
+        depth; pixels outside the fan are set to zero.
+    minRangeMm - Minimum radial distance (mm) from the fan's apex that is
+        rendered; pixels closer than this are set to zero.
+    maxRangeMm - Maximum radial distance (mm) from the fan's apex that is
+        rendered; pixels farther than this are set to zero.
     matrixSizeX - Number of pixels of the simulated image along X.
     matrixSizeY - Number of pixels of the simulated image along Y.
     pixelSpacingX - Pixel spacing of the simulated image along X (mm).
@@ -77,6 +86,9 @@ class ICESimParameterNode:
     inputSegmentation: vtkMRMLSegmentationNode
     imagingPlaneTransform: vtkMRMLLinearTransformNode
     scanPlaneOrientation: str = "Perpendicular"
+    viewAngleDeg: Annotated[float, WithinRange(1.0, 179.0)] = 90.0
+    minRangeMm: Annotated[float, WithinRange(0.0, 1000.0)] = 0.0
+    maxRangeMm: Annotated[float, WithinRange(0.0, 1000.0)] = 200.0
     matrixSizeX: Annotated[int, WithinRange(16, 1024)] = 256
     matrixSizeY: Annotated[int, WithinRange(16, 1024)] = 256
     pixelSpacingX: Annotated[float, WithinRange(0.01, 10.0)] = 0.5
@@ -117,9 +129,9 @@ class ICESimWidget(ScriptedLoadableModuleWidget, VTKObservationMixin):
 
         self.ui.applyButton.connect("clicked(bool)", self.onApplyButton)
 
-        # connectGui() does not reliably bind qMRMLNodeComboBox widgets in
-        # this Slicer build (its GUI tag comes back as 0, and selections
-        # never reach the parameter node), so wire these three explicitly.
+        # connectGui() does not reliably bind widgets to the parameter node
+        # in this Slicer build (its GUI tag comes back as 0, and edits never
+        # reach the parameter node), so wire every widget explicitly.
         self.ui.inputSegmentation.connect(
             "currentNodeChanged(vtkMRMLNode*)", self.onInputSegmentationChanged)
         self.ui.imagingPlaneTransform.connect(
@@ -128,6 +140,20 @@ class ICESimWidget(ScriptedLoadableModuleWidget, VTKObservationMixin):
             "currentNodeChanged(vtkMRMLNode*)", self.onOutputVolumeChanged)
         self.ui.scanPlaneOrientation.connect(
             "currentTextChanged(QString)", self.onScanPlaneOrientationChanged)
+        self.ui.viewAngleDeg.connect(
+            "valueChanged(double)", self.onViewAngleDegChanged)
+        self.ui.minRangeMm.connect(
+            "valueChanged(double)", self.onMinRangeMmChanged)
+        self.ui.maxRangeMm.connect(
+            "valueChanged(double)", self.onMaxRangeMmChanged)
+        self.ui.matrixSizeX.connect(
+            "valueChanged(int)", self.onMatrixSizeXChanged)
+        self.ui.matrixSizeY.connect(
+            "valueChanged(int)", self.onMatrixSizeYChanged)
+        self.ui.pixelSpacingX.connect(
+            "valueChanged(double)", self.onPixelSpacingXChanged)
+        self.ui.pixelSpacingY.connect(
+            "valueChanged(double)", self.onPixelSpacingYChanged)
 
         self.initializeParameterNode()
 
@@ -159,12 +185,19 @@ class ICESimWidget(ScriptedLoadableModuleWidget, VTKObservationMixin):
         if self._parameterNode:
             self._parameterNodeGuiTag = self._parameterNode.connectGui(self.ui)
             # connectGui() does not push the node-reference parameters onto
-            # the qMRMLNodeComboBox widgets in this Slicer build, so set the
-            # widgets' initial state from the parameter node here.
+            # the widgets in this Slicer build, so set the widgets' initial
+            # state from the parameter node here.
             self.ui.inputSegmentation.setCurrentNode(self._parameterNode.inputSegmentation)
             self.ui.imagingPlaneTransform.setCurrentNode(self._parameterNode.imagingPlaneTransform)
             self.ui.outputVolume.setCurrentNode(self._parameterNode.outputVolume)
             self.ui.scanPlaneOrientation.setCurrentText(self._parameterNode.scanPlaneOrientation)
+            self.ui.viewAngleDeg.setValue(self._parameterNode.viewAngleDeg)
+            self.ui.minRangeMm.setValue(self._parameterNode.minRangeMm)
+            self.ui.maxRangeMm.setValue(self._parameterNode.maxRangeMm)
+            self.ui.matrixSizeX.setValue(self._parameterNode.matrixSizeX)
+            self.ui.matrixSizeY.setValue(self._parameterNode.matrixSizeY)
+            self.ui.pixelSpacingX.setValue(self._parameterNode.pixelSpacingX)
+            self.ui.pixelSpacingY.setValue(self._parameterNode.pixelSpacingY)
             self._setObservedTransformNode(self._parameterNode.imagingPlaneTransform)
         else:
             self._setObservedTransformNode(None)
@@ -216,6 +249,34 @@ class ICESimWidget(ScriptedLoadableModuleWidget, VTKObservationMixin):
         if self._parameterNode:
             self._parameterNode.scanPlaneOrientation = text
 
+    def onViewAngleDegChanged(self, value):
+        if self._parameterNode:
+            self._parameterNode.viewAngleDeg = value
+
+    def onMinRangeMmChanged(self, value):
+        if self._parameterNode:
+            self._parameterNode.minRangeMm = value
+
+    def onMaxRangeMmChanged(self, value):
+        if self._parameterNode:
+            self._parameterNode.maxRangeMm = value
+
+    def onMatrixSizeXChanged(self, value):
+        if self._parameterNode:
+            self._parameterNode.matrixSizeX = value
+
+    def onMatrixSizeYChanged(self, value):
+        if self._parameterNode:
+            self._parameterNode.matrixSizeY = value
+
+    def onPixelSpacingXChanged(self, value):
+        if self._parameterNode:
+            self._parameterNode.pixelSpacingX = value
+
+    def onPixelSpacingYChanged(self, value):
+        if self._parameterNode:
+            self._parameterNode.pixelSpacingY = value
+
     def onApplyButton(self):
         with slicer.util.tryWithErrorDisplay(_("Failed to compute results."), waitCursor=True):
             self.logic.process(self._parameterNode)
@@ -261,28 +322,70 @@ class ICESimLogic(ScriptedLoadableModuleLogic):
         sizeY = parameterNode.matrixSizeY
         spacingX = parameterNode.pixelSpacingX
         spacingY = parameterNode.pixelSpacingY
+        viewAngleDeg = parameterNode.viewAngleDeg
+        minRangeMm = parameterNode.minRangeMm
+        maxRangeMm = parameterNode.maxRangeMm
 
         startTime = time.time()
         logging.info("ICESim processing started")
 
+        # depthOffsetMm shapes which pixels the fan mask shows (see
+        # _computeDepthOffsetMm) but is intentionally NOT applied to
+        # ijkToRAS: row 0 must stay physically anchored at the transform's
+        # origin (the catheter tip) so the image edge stays in contact
+        # with the catheter in the scene, rather than floating away from
+        # it by depthOffsetMm.
+        depthOffsetMm = self._computeDepthOffsetMm(viewAngleDeg, minRangeMm, spacingY)
         ijkToRAS = self._computeIJKToRAS(
             parameterNode.imagingPlaneTransform, sizeX, sizeY, spacingX, spacingY,
             parameterNode.scanPlaneOrientation)
         bloodPoolMask = self._resliceSegmentationToPlane(
             parameterNode.inputSegmentation, ijkToRAS, sizeX, sizeY)
         imageArray = self._renderUltrasoundImage(bloodPoolMask)
+        fanMask = self._computeFanMask(
+            sizeX, sizeY, spacingX, spacingY, viewAngleDeg, minRangeMm, maxRangeMm, depthOffsetMm)
+        imageArray[~fanMask] = 0
         self._updateOutputVolume(parameterNode.outputVolume, imageArray, ijkToRAS)
 
         logging.info(f"ICESim processing completed in {time.time() - startTime:.2f} seconds")
 
     @staticmethod
+    def _computeDepthOffsetMm(viewAngleDeg, minRangeMm, spacingY):
+        """Depth (mm, from the true apex/catheter tip) that image row j=0
+        corresponds to.
+
+        With no offset, row 0 sits exactly at the apex. But the fan is
+        very narrow near the apex, so as soon as a near-range cutoff
+        (minRangeMm) excludes anything, it excludes the *entire* cone
+        cross-section for a band of depths right below the apex (the cone
+        edges only clear the exclusion circle once depth >=
+        minRangeMm * cos(halfAngle)) -- so the fan's two straight edges
+        would not reach the image's near edge, leaving it blank instead of
+        touching the frame like a real ultrasound sector display.
+
+        Cropping row 0 to that depth (plus one extra pixel row of margin,
+        since exactly at it the edges are merely tangent to the exclusion
+        circle and may be lost to rounding) makes the two edges -- and the
+        rounded near-field cutout between them -- touch the image's near
+        edge, matching a real sector display.
+        """
+        if minRangeMm <= 0:
+            return 0.0
+        halfAngleRad = math.radians(viewAngleDeg / 2.0)
+        return minRangeMm * math.cos(halfAngleRad) + spacingY
+
+    @staticmethod
     def _computeIJKToRAS(transformNode, sizeX, sizeY, spacingX, spacingY, orientation="Perpendicular"):
         """Build the IJK-to-RAS matrix of the simulated image.
 
-        Row j=0 corresponds to the probe (depth 0), with depth increasing
-        along +j; column i is centered laterally around the transform's
-        origin (its fourth column vector, the catheter tip). Depending on
-        orientation:
+        Row j=0 corresponds to the probe (depth 0) exactly -- the image's
+        near edge is always physically anchored at the transform's origin
+        (the catheter tip), so it stays in contact with the catheter in
+        the scene. (_computeFanMask separately crops which pixels are
+        shown so the fan's near edges appear to touch that same row 0; see
+        _computeDepthOffsetMm for why those are deliberately different.)
+        Depth increases along +j; column i is centered laterally around
+        the origin. Depending on orientation:
 
         - "Perpendicular" (default): the plane normal is the transform's
           third column vector (the catheter axis), so the imaging plane is
@@ -377,6 +480,30 @@ class ICESimLogic(ScriptedLoadableModuleLogic):
         image = baseImage * (1.0 + noiseSigma * speckle)
         image = np.clip(image, 0, 255)
         return image.astype(np.uint8)
+
+    @staticmethod
+    def _computeFanMask(sizeX, sizeY, spacingX, spacingY, viewAngleDeg, minRangeMm, maxRangeMm, depthOffsetMm=0.0):
+        """Boolean array (shape sizeY x sizeX), True inside the fan-shaped
+        field of view.
+
+        The true apex (the catheter tip) is at depth 0 and is where image
+        row j=0 is physically anchored (see _computeIJKToRAS), but for the
+        purpose of shaping this mask only, row j=0 is treated as depth
+        depthOffsetMm instead of depth 0 (see _computeDepthOffsetMm) so
+        that when a near-range cutoff is in effect, the fan's straight
+        edges (and the rounded cutout between them) touch the image's near
+        edge instead of leaving a blank gap above them. Angles open
+        symmetrically from the central (depth) axis within
+        +/- viewAngleDeg/2; pixels whose radial distance from the true
+        apex (using this same row-0-is-depthOffsetMm convention) falls
+        outside [minRangeMm, maxRangeMm] are excluded as well.
+        """
+        cx = (sizeX - 1) / 2.0
+        lateral = (np.arange(sizeX)[np.newaxis, :] - cx) * spacingX
+        depth = depthOffsetMm + np.arange(sizeY)[:, np.newaxis] * spacingY
+        angleDeg = np.degrees(np.arctan2(np.abs(lateral), depth))
+        radius = np.sqrt(lateral ** 2 + depth ** 2)
+        return (angleDeg <= (viewAngleDeg / 2.0)) & (radius >= minRangeMm) & (radius <= maxRangeMm)
 
     @staticmethod
     def _updateOutputVolume(outputVolumeNode, imageArray, ijkToRAS):

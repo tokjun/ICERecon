@@ -55,7 +55,7 @@
          <bool>true</bool>
         </property>
         <property name="addEnabled">
-         <bool>false</bool>
+         <bool>true</bool>
         </property>
         <property name="removeEnabled">
          <bool>false</bool>
@@ -104,13 +104,88 @@
        </widget>
       </item>
       <item row="1" column="0">
+       <widget class="QLabel" name="viewAngleDegLabel">
+        <property name="text">
+         <string>View angle (deg):</string>
+        </property>
+       </widget>
+      </item>
+      <item row="1" column="1">
+       <widget class="QDoubleSpinBox" name="viewAngleDeg">
+        <property name="toolTip">
+         <string>Full opening angle of the fan-shaped imaging area. The apex is at the center of the image's near edge (the catheter); pixels outside the fan are set to zero.</string>
+        </property>
+        <property name="decimals">
+         <number>1</number>
+        </property>
+        <property name="minimum">
+         <double>1.000000000000000</double>
+        </property>
+        <property name="maximum">
+         <double>179.000000000000000</double>
+        </property>
+        <property name="value">
+         <double>90.000000000000000</double>
+        </property>
+       </widget>
+      </item>
+      <item row="2" column="0">
+       <widget class="QLabel" name="rangeLabel">
+        <property name="text">
+         <string>Range (min, max) [mm]:</string>
+        </property>
+       </widget>
+      </item>
+      <item row="2" column="1">
+       <layout class="QHBoxLayout" name="rangeLayout">
+        <item>
+         <widget class="QDoubleSpinBox" name="minRangeMm">
+          <property name="toolTip">
+           <string>Minimum radial distance from the fan's apex (the catheter) that is rendered; pixels closer than this are set to zero.</string>
+          </property>
+          <property name="decimals">
+           <number>1</number>
+          </property>
+          <property name="minimum">
+           <double>0.000000000000000</double>
+          </property>
+          <property name="maximum">
+           <double>1000.000000000000000</double>
+          </property>
+          <property name="value">
+           <double>0.000000000000000</double>
+          </property>
+         </widget>
+        </item>
+        <item>
+         <widget class="QDoubleSpinBox" name="maxRangeMm">
+          <property name="toolTip">
+           <string>Maximum radial distance from the fan's apex (the catheter) that is rendered; pixels farther than this are set to zero.</string>
+          </property>
+          <property name="decimals">
+           <number>1</number>
+          </property>
+          <property name="minimum">
+           <double>0.000000000000000</double>
+          </property>
+          <property name="maximum">
+           <double>1000.000000000000000</double>
+          </property>
+          <property name="value">
+           <double>200.000000000000000</double>
+          </property>
+         </widget>
+        </item>
+       </layout>
+      </item>
+      <item row="3" column="0">
        <widget class="QLabel" name="matrixSizeLabel">
         <property name="text">
          <string>Matrix size (X x Y):</string>
         </property>
        </widget>
       </item>
-      <item row="1" column="1">
+      <item row="3" column="1">
        <layout class="QHBoxLayout" name="matrixSizeLayout">
         <item>
          <widget class="QSpinBox" name="matrixSizeX">
@@ -140,14 +215,14 @@
         </item>
        </layout>
       </item>
-      <item row="2" column="0">
+      <item row="4" column="0">
        <widget class="QLabel" name="pixelSpacingLabel">
         <property name="text">
          <string>Pixel spacing (sx, sy) [mm]:</string>
         </property>
        </widget>
       </item>
-      <item row="2" column="1">
+      <item row="4" column="1">
        <layout class="QHBoxLayout" name="pixelSpacingLayout">
         <item>
          <widget class="QDoubleSpinBox" name="pixelSpacingX">

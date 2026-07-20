@@ -6,3 +6,6 @@ The extension can be implemented in Python for initial prototyping, but may be c
 
 ICESim takes two input nodes: (1) 3D segmentation of the heart chambers and vessels, and (2) a linear transform node that represents the position and orientation of the imaging plane, which is attached to the ICE probe. ICESim also takes sveral parameters, including matrix size (X and Y) and pixel spacing (sx, sy) of the simulated ultrasound. ICESim also needs one output scalar volume node.
 ICESim generates a simulated ICE image by taking the cross section of the 3D segmentation along the imaging plane, and render a simulated ultrasound image, which shows dark pixel within the blood pool (heart chambers and blood vessles in the segmentaiton) and bright pixels in the tissue (outside the blood pool). Some white noises are added to the image to make it more realistic.
+
+
+It is working well. Since this is simulating ultrasound imaging, we need to have a funnel-shape imaging area, and the rest should have zero pixel intensity. The center of the funnel is at the center of the imaging plane edge at the catheter, and The imaging view angle should be configurable.
