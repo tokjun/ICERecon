@@ -81,6 +81,12 @@ class ICESimParameterNode:
         ultrasound tissue/blood intensities with speckle noise (default).
         "Segmentation": each structure in the segmentation keeps its own
         exported label value (0 = background), with no noise added.
+    sweepAngleDeg - Rotation (degrees) of the imaging plane about the
+        catheter axis (the imagingPlaneTransform's third column vector),
+        applied on top of that transform without modifying it. Lets the
+        imaging plane be swept around the catheter interactively (e.g. to
+        preview a mechanically rotated or side-firing catheter's sweep)
+        without altering the tracked transform node itself.
     matrixSizeX - Number of pixels of the simulated image along X.
     matrixSizeY - Number of pixels of the simulated image along Y.
     pixelSpacingX - Pixel spacing of the simulated image along X (mm).
@@ -94,6 +100,7 @@ class ICESimParameterNode:
     minRangeMm: Annotated[float, WithinRange(0.0, 1000.0)] = 0.0
     maxRangeMm: Annotated[float, WithinRange(0.0, 1000.0)] = 200.0
     imageContrastMode: str = "Ultrasound"
+    sweepAngleDeg: Annotated[float, WithinRange(-180.0, 180.0)] = 0.0
     matrixSizeX: Annotated[int, WithinRange(16, 1024)] = 256
     matrixSizeY: Annotated[int, WithinRange(16, 1024)] = 256
     pixelSpacingX: Annotated[float, WithinRange(0.01, 10.0)] = 0.5
@@ -161,6 +168,8 @@ class ICESimWidget(ScriptedLoadableModuleWidget, VTKObservationMixin):
             "valueChanged(double)", self.onPixelSpacingYChanged)
         self.ui.imageContrastMode.connect(
             "currentTextChanged(QString)", self.onImageContrastModeChanged)
+        self.ui.sweepAngleDeg.connect(
+            "valueChanged(double)", self.onSweepAngleDegChanged)
 
         self.initializeParameterNode()
 
@@ -206,6 +215,7 @@ class ICESimWidget(ScriptedLoadableModuleWidget, VTKObservationMixin):
             self.ui.pixelSpacingX.setValue(self._parameterNode.pixelSpacingX)
             self.ui.pixelSpacingY.setValue(self._parameterNode.pixelSpacingY)
             self.ui.imageContrastMode.setCurrentText(self._parameterNode.imageContrastMode)
+            self.ui.sweepAngleDeg.setValue(self._parameterNode.sweepAngleDeg)
             self._setObservedTransformNode(self._parameterNode.imagingPlaneTransform)
         else:
             self._setObservedTransformNode(None)
@@ -289,6 +299,13 @@ class ICESimWidget(ScriptedLoadableModuleWidget, VTKObservationMixin):
         if self._parameterNode:
             self._parameterNode.imageContrastMode = text
 
+    def onSweepAngleDegChanged(self, value):
+        if self._parameterNode:
+            self._parameterNode.sweepAngleDeg = value
+        # The sweep slider is meant for interactive scrubbing, so update
+        # live rather than waiting for the user to click Apply.
+        self._autoUpdateOutputVolume()
+
     def onApplyButton(self):
         with slicer.util.tryWithErrorDisplay(_("Failed to compute results."), waitCursor=True):
             self.logic.process(self._parameterNode)
@@ -358,7 +375,7 @@ class ICESimLogic(ScriptedLoadableModuleLogic):
         depthOffsetMm = self._computeDepthOffsetMm(viewAngleDeg, minRangeMm, spacingY)
         ijkToRAS = self._computeIJKToRAS(
             parameterNode.imagingPlaneTransform, sizeX, sizeY, spacingX, spacingY,
-            parameterNode.scanPlaneOrientation)
+            parameterNode.scanPlaneOrientation, parameterNode.sweepAngleDeg)
         labelArray = self._resliceSegmentationToPlane(
             parameterNode.inputSegmentation, ijkToRAS, sizeX, sizeY)
         if parameterNode.imageContrastMode == "Segmentation":
@@ -399,8 +416,15 @@ class ICESimLogic(ScriptedLoadableModuleLogic):
         return minRangeMm * math.cos(halfAngleRad) + spacingY
 
     @staticmethod
-    def _computeIJKToRAS(transformNode, sizeX, sizeY, spacingX, spacingY, orientation="Perpendicular"):
+    def _computeIJKToRAS(transformNode, sizeX, sizeY, spacingX, spacingY, orientation="Perpendicular",
+                          sweepAngleDeg=0.0):
         """Build the IJK-to-RAS matrix of the simulated image.
+
+        sweepAngleDeg rotates the plane about the transform's third column
+        vector (the catheter axis) before orientation is applied, without
+        modifying transformNode itself -- this is what lets a "Sweeping"
+        slider preview different rotations of the imaging plane around the
+        catheter without touching the tracked imagingPlaneTransform node.
 
         Row j=0 corresponds to the probe (depth 0) exactly -- the image's
         near edge is always physically anchored at the transform's origin
@@ -435,6 +459,14 @@ class ICESimLogic(ScriptedLoadableModuleLogic):
         yAxis = [transformToWorld.GetElement(r, 1) for r in range(3)]
         zAxis = [transformToWorld.GetElement(r, 2) for r in range(3)]
         origin = [transformToWorld.GetElement(r, 3) for r in range(3)]
+
+        if sweepAngleDeg:
+            sweepRad = math.radians(sweepAngleDeg)
+            cosT, sinT = math.cos(sweepRad), math.sin(sweepRad)
+            xAxis, yAxis = (
+                [xAxis[r] * cosT + yAxis[r] * sinT for r in range(3)],
+                [yAxis[r] * cosT - xAxis[r] * sinT for r in range(3)],
+            )
 
         if orientation == "Parallel (side)":
             iAxis, jAxis, kAxis = [-c for c in zAxis], xAxis, yAxis

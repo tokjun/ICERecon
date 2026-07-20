@@ -69,6 +69,41 @@
     </widget>
    </item>
    <item>
+    <widget class="ctkCollapsibleButton" name="sweepingCollapsibleButton">
+     <property name="text">
+      <string>Sweeping</string>
+     </property>
+     <layout class="QFormLayout" name="sweepingFormLayout">
+      <item row="0" column="0">
+       <widget class="QLabel" name="sweepAngleDegLabel">
+        <property name="text">
+         <string>Sweep angle (deg):</string>
+        </property>
+       </widget>
+      </item>
+      <item row="0" column="1">
+       <widget class="ctkSliderWidget" name="sweepAngleDeg">
+        <property name="toolTip">
+         <string>Rotation of the imaging plane about the catheter axis, applied on top of the imaging plane transform without modifying it.</string>
+        </property>
+        <property name="decimals">
+         <number>1</number>
+        </property>
+        <property name="minimum">
+         <double>-180.000000000000000</double>
+        </property>
+        <property name="maximum">
+         <double>180.000000000000000</double>
+        </property>
+        <property name="value">
+         <double>0.000000000000000</double>
+        </property>
+       </widget>
+      </item>
+     </layout>
+    </widget>
+   </item>
+   <item>
     <widget class="ctkCollapsibleButton" name="parametersCollapsibleButton">
      <property name="text">
       <string>Parameters</string>
@@ -376,6 +411,11 @@
    <extends>QWidget</extends>
    <header>ctkCollapsibleButton.h</header>
    <container>1</container>
+  </customwidget>
+  <customwidget>
+   <class>ctkSliderWidget</class>
+   <extends>QWidget</extends>
+   <header>ctkSliderWidget.h</header>
   </customwidget>
  </customwidgets>
  <resources/>
