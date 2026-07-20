@@ -4,12 +4,179 @@
  <widget class="qMRMLWidget" name="ICERecon">
   <layout class="QVBoxLayout" name="verticalLayout">
    <item>
-    <widget class="QLabel" name="placeholderLabel">
+    <widget class="ctkCollapsibleButton" name="inputsCollapsibleButton">
      <property name="text">
-      <string>ICERecon is not yet implemented.</string>
+      <string>Inputs</string>
      </property>
-     <property name="wordWrap">
+     <layout class="QFormLayout" name="inputsFormLayout">
+      <item row="0" column="0">
+       <widget class="QLabel" name="inputVolumeLabel">
+        <property name="text">
+         <string>Input volume:</string>
+        </property>
+       </widget>
+      </item>
+      <item row="0" column="1">
+       <widget class="qMRMLNodeComboBox" name="inputVolume">
+        <property name="nodeTypes">
+         <stringlist>
+          <string>vtkMRMLScalarVolumeNode</string>
+         </stringlist>
+        </property>
+        <property name="noneEnabled">
+         <bool>true</bool>
+        </property>
+        <property name="addEnabled">
+         <bool>false</bool>
+        </property>
+        <property name="removeEnabled">
+         <bool>false</bool>
+        </property>
+        <property name="toolTip">
+         <string>The moving 2D scalar volume to paint into the output volume (e.g. ICESim's output volume, or a live tracked image).</string>
+        </property>
+       </widget>
+      </item>
+      <item row="1" column="0">
+       <widget class="QLabel" name="outputVolumeLabel">
+        <property name="text">
+         <string>Output volume:</string>
+        </property>
+       </widget>
+      </item>
+      <item row="1" column="1">
+       <widget class="qMRMLNodeComboBox" name="outputVolume">
+        <property name="nodeTypes">
+         <stringlist>
+          <string>vtkMRMLScalarVolumeNode</string>
+         </stringlist>
+        </property>
+        <property name="noneEnabled">
+         <bool>true</bool>
+        </property>
+        <property name="addEnabled">
+         <bool>true</bool>
+        </property>
+        <property name="removeEnabled">
+         <bool>true</bool>
+        </property>
+        <property name="renameEnabled">
+         <bool>true</bool>
+        </property>
+        <property name="toolTip">
+         <string>The 3D scalar volume being reconstructed. Must be initialized (see Bounding Box) before it can be painted.</string>
+        </property>
+       </widget>
+      </item>
+      <item row="2" column="0">
+       <widget class="QLabel" name="intensityScaleLabel">
+        <property name="text">
+         <string>Intensity scale:</string>
+        </property>
+       </widget>
+      </item>
+      <item row="2" column="1">
+       <widget class="QDoubleSpinBox" name="intensityScale">
+        <property name="toolTip">
+         <string>Multiplier applied to the input's pixel values before painting them into the output volume, clipped to the output's valid range. Applies to subsequent paints only, not retroactively.</string>
+        </property>
+        <property name="decimals">
+         <number>2</number>
+        </property>
+        <property name="minimum">
+         <double>0.010000000000000</double>
+        </property>
+        <property name="maximum">
+         <double>10.000000000000000</double>
+        </property>
+        <property name="value">
+         <double>1.000000000000000</double>
+        </property>
+       </widget>
+      </item>
+     </layout>
+    </widget>
+   </item>
+   <item>
+    <widget class="ctkCollapsibleButton" name="boundingBoxCollapsibleButton">
+     <property name="text">
+      <string>Bounding Box</string>
+     </property>
+     <layout class="QFormLayout" name="boundingBoxFormLayout">
+      <item row="0" column="0">
+       <widget class="QLabel" name="boundingBoxLabel">
+        <property name="text">
+         <string>Bounding box:</string>
+        </property>
+       </widget>
+      </item>
+      <item row="0" column="1">
+       <widget class="qMRMLNodeComboBox" name="boundingBox">
+        <property name="nodeTypes">
+         <stringlist>
+          <string>vtkMRMLMarkupsROINode</string>
+         </stringlist>
+        </property>
+        <property name="noneEnabled">
+         <bool>true</bool>
+        </property>
+        <property name="addEnabled">
+         <bool>true</bool>
+        </property>
+        <property name="removeEnabled">
+         <bool>true</bool>
+        </property>
+        <property name="toolTip">
+         <string>ROI defining the physical extent of the output volume.</string>
+        </property>
+       </widget>
+      </item>
+      <item row="1" column="0">
+       <widget class="QLabel" name="outputSpacingMmLabel">
+        <property name="text">
+         <string>Output spacing (mm):</string>
+        </property>
+       </widget>
+      </item>
+      <item row="1" column="1">
+       <widget class="QDoubleSpinBox" name="outputSpacingMm">
+        <property name="toolTip">
+         <string>Isotropic voxel spacing of the output volume, used when initializing it from the bounding box.</string>
+        </property>
+        <property name="decimals">
+         <number>2</number>
+        </property>
+        <property name="minimum">
+         <double>0.050000000000000</double>
+        </property>
+        <property name="maximum">
+         <double>10.000000000000000</double>
+        </property>
+        <property name="value">
+         <double>1.000000000000000</double>
+        </property>
+       </widget>
+      </item>
+      <item row="2" column="0" colspan="2">
+       <widget class="QPushButton" name="initializeButton">
+        <property name="toolTip">
+         <string>(Re)allocate the output volume to cover the bounding box at the given spacing, filled with zero. Discards any previously reconstructed data.</string>
+        </property>
+        <property name="text">
+         <string>Initialize Output Volume</string>
+        </property>
+       </widget>
+      </item>
+     </layout>
+    </widget>
+   </item>
+   <item>
+    <widget class="QPushButton" name="applyButton">
+     <property name="enabled">
       <bool>true</bool>
+     </property>
+     <property name="text">
+      <string>Apply</string>
      </property>
     </widget>
    </item>
@@ -35,7 +202,37 @@
    <header>qMRMLWidget.h</header>
    <container>1</container>
   </customwidget>
+  <customwidget>
+   <class>qMRMLNodeComboBox</class>
+   <extends>QWidget</extends>
+   <header>qMRMLNodeComboBox.h</header>
+  </customwidget>
+  <customwidget>
+   <class>ctkCollapsibleButton</class>
+   <extends>QWidget</extends>
+   <header>ctkCollapsibleButton.h</header>
+   <container>1</container>
+  </customwidget>
  </customwidgets>
  <resources/>
- <connections/>
+ <connections>
+  <connection>
+   <sender>ICERecon</sender>
+   <signal>mrmlSceneChanged(vtkMRMLScene*)</signal>
+   <receiver>inputVolume</receiver>
+   <slot>setMRMLScene(vtkMRMLScene*)</slot>
+  </connection>
+  <connection>
+   <sender>ICERecon</sender>
+   <signal>mrmlSceneChanged(vtkMRMLScene*)</signal>
+   <receiver>outputVolume</receiver>
+   <slot>setMRMLScene(vtkMRMLScene*)</slot>
+  </connection>
+  <connection>
+   <sender>ICERecon</sender>
+   <signal>mrmlSceneChanged(vtkMRMLScene*)</signal>
+   <receiver>boundingBox</receiver>
+   <slot>setMRMLScene(vtkMRMLScene*)</slot>
+  </connection>
+ </connections>
 </ui>
