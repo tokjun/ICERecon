@@ -277,7 +277,7 @@
       <item row="0" column="1">
        <widget class="QComboBox" name="imageContrastMode">
         <property name="toolTip">
-         <string>Ultrasound: simulated grayscale ultrasound tissue/blood intensities with speckle noise. Segmentation: flat label image (blood pool filled with a fixed value, everything else zero), with no noise.</string>
+         <string>Ultrasound: simulated grayscale ultrasound tissue/blood intensities with speckle noise. Segmentation: label image where each structure keeps its own exported label value (0 = background), with no noise.</string>
         </property>
         <item>
          <property name="text">

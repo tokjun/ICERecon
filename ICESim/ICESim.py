@@ -79,8 +79,8 @@ class ICESimParameterNode:
         rendered; pixels farther than this are set to zero.
     imageContrastMode - "Ultrasound": render simulated grayscale
         ultrasound tissue/blood intensities with speckle noise (default).
-        "Segmentation": fill the blood pool with a flat label value and
-        everything else with zero, with no noise added.
+        "Segmentation": each structure in the segmentation keeps its own
+        exported label value (0 = background), with no noise added.
     matrixSizeX - Number of pixels of the simulated image along X.
     matrixSizeY - Number of pixels of the simulated image along Y.
     pixelSpacingX - Pixel spacing of the simulated image along X (mm).
@@ -324,10 +324,6 @@ class ICESimLogic(ScriptedLoadableModuleLogic):
     SPECKLE_SIGMA_AXIAL_PX = 0.8
     SPECKLE_SIGMA_LATERAL_PX = 1.8
 
-    # Flat label values used in "Segmentation" image contrast mode.
-    SEGMENTATION_BLOOD_VALUE = 1
-    SEGMENTATION_TISSUE_VALUE = 0
-
     def process(self, parameterNode: ICESimParameterNode):
         """Generate the simulated ICE image.
 
@@ -363,11 +359,12 @@ class ICESimLogic(ScriptedLoadableModuleLogic):
         ijkToRAS = self._computeIJKToRAS(
             parameterNode.imagingPlaneTransform, sizeX, sizeY, spacingX, spacingY,
             parameterNode.scanPlaneOrientation)
-        bloodPoolMask = self._resliceSegmentationToPlane(
+        labelArray = self._resliceSegmentationToPlane(
             parameterNode.inputSegmentation, ijkToRAS, sizeX, sizeY)
         if parameterNode.imageContrastMode == "Segmentation":
-            imageArray = self._renderSegmentationImage(bloodPoolMask)
+            imageArray = self._renderSegmentationImage(labelArray)
         else:
+            bloodPoolMask = labelArray != 0
             imageArray = self._renderUltrasoundImage(bloodPoolMask)
         fanMask = self._computeFanMask(
             sizeX, sizeY, spacingX, spacingY, viewAngleDeg, minRangeMm, maxRangeMm, depthOffsetMm)
@@ -460,8 +457,10 @@ class ICESimLogic(ScriptedLoadableModuleLogic):
     def _resliceSegmentationToPlane(segmentationNode, ijkToRAS, sizeX, sizeY):
         """Reslice the (merged) segmentation labelmap onto the imaging plane.
 
-        Returns a boolean numpy array of shape (sizeY, sizeX) that is True
-        inside the blood pool (i.e. inside any visible segment).
+        Returns an integer numpy array of shape (sizeY, sizeX) holding each
+        segment's exported label value (the same convention as
+        ExportVisibleSegmentsToLabelmapNode: a distinct positive integer
+        per segment, 0 = background, outside any segment).
         """
         labelmapVolumeNode = slicer.mrmlScene.AddNewNodeByClass(
             "vtkMRMLLabelMapVolumeNode", "ICESim_TempLabelmap")
@@ -489,19 +488,20 @@ class ICESimLogic(ScriptedLoadableModuleLogic):
             reslice.SetBackgroundLevel(0)
             reslice.Update()
 
-            maskArray = vtk_np.vtk_to_numpy(reslice.GetOutput().GetPointData().GetScalars())
-            maskArray = maskArray.reshape(sizeY, sizeX)
-            return maskArray != 0
+            labelArray = vtk_np.vtk_to_numpy(reslice.GetOutput().GetPointData().GetScalars())
+            # Copy: the array otherwise shares memory with the reslice
+            # filter's output, which is discarded when this function returns.
+            return labelArray.reshape(sizeY, sizeX).copy()
         finally:
             slicer.mrmlScene.RemoveNode(labelmapVolumeNode)
 
-    @classmethod
-    def _renderSegmentationImage(cls, bloodPoolMask):
-        """Render a flat label image: SEGMENTATION_BLOOD_VALUE within the
-        blood pool, SEGMENTATION_TISSUE_VALUE elsewhere, with no noise.
+    @staticmethod
+    def _renderSegmentationImage(labelArray):
+        """Render a label image with no noise: each segment keeps its own
+        exported label value (see _resliceSegmentationToPlane), 0 =
+        background.
         """
-        image = np.where(bloodPoolMask, cls.SEGMENTATION_BLOOD_VALUE, cls.SEGMENTATION_TISSUE_VALUE)
-        return image.astype(np.uint8)
+        return labelArray.astype(np.uint8)
 
     @classmethod
     def _renderUltrasoundImage(cls, bloodPoolMask):
