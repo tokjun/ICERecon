@@ -304,6 +304,14 @@ class ICESimLogic(ScriptedLoadableModuleLogic):
     BLOOD_INTENSITY = 15.0
     BLOOD_NOISE_SIGMA = 0.35
 
+    # Speckle grain size (pixels), i.e. the spatial correlation length of
+    # the noise: real ultrasound speckle isn't per-pixel-independent, its
+    # grain size is set by the beam width (lateral) and pulse length
+    # (axial), which are usually anisotropic -- lateral resolution is
+    # coarser than axial, so grains are wider than they are tall.
+    SPECKLE_SIGMA_AXIAL_PX = 0.8
+    SPECKLE_SIGMA_LATERAL_PX = 1.8
+
     def process(self, parameterNode: ICESimParameterNode):
         """Generate the simulated ICE image.
 
@@ -470,16 +478,51 @@ class ICESimLogic(ScriptedLoadableModuleLogic):
 
     @classmethod
     def _renderUltrasoundImage(cls, bloodPoolMask):
-        """Render tissue/blood intensities with multiplicative speckle noise."""
+        """Render tissue/blood intensities with spatially-correlated speckle
+        noise (rather than per-pixel-independent noise, which looks like
+        static instead of the grainy texture of real ultrasound speckle).
+        """
         rng = np.random.default_rng()
 
         baseImage = np.where(bloodPoolMask, cls.BLOOD_INTENSITY, cls.TISSUE_INTENSITY)
         noiseSigma = np.where(bloodPoolMask, cls.BLOOD_NOISE_SIGMA, cls.TISSUE_NOISE_SIGMA)
+
         speckle = rng.normal(0.0, 1.0, size=baseImage.shape)
+        kernel = cls._gaussianKernel2D(cls.SPECKLE_SIGMA_AXIAL_PX, cls.SPECKLE_SIGMA_LATERAL_PX)
+        speckle = cls._convolveSame(speckle, kernel)
+        speckle /= (speckle.std() + 1e-8)  # blurring reduces variance; restore unit std
 
         image = baseImage * (1.0 + noiseSigma * speckle)
         image = np.clip(image, 0, 255)
         return image.astype(np.uint8)
+
+    @staticmethod
+    def _gaussianKernel2D(sigmaRows, sigmaCols):
+        """Separable 2D Gaussian kernel (outer product of two 1D kernels),
+        one sigma (pixels) per axis so the blur can be anisotropic.
+        """
+        def axisKernel(sigma):
+            if sigma <= 1e-6:
+                return np.array([1.0])
+            radius = max(1, int(round(3 * sigma)))
+            x = np.arange(-radius, radius + 1)
+            k = np.exp(-(x ** 2) / (2.0 * sigma ** 2))
+            return k / k.sum()
+
+        return np.outer(axisKernel(sigmaRows), axisKernel(sigmaCols))
+
+    @staticmethod
+    def _convolveSame(image, kernel):
+        """2D convolution via FFT (no scipy dependency), cropped to the
+        same output size as the input, centered on the kernel.
+        """
+        padShape = (image.shape[0] + kernel.shape[0] - 1, image.shape[1] + kernel.shape[1] - 1)
+        imageF = np.fft.rfft2(image, s=padShape)
+        kernelF = np.fft.rfft2(kernel, s=padShape)
+        convolved = np.fft.irfft2(imageF * kernelF, s=padShape)
+        startRow = kernel.shape[0] // 2
+        startCol = kernel.shape[1] // 2
+        return convolved[startRow:startRow + image.shape[0], startCol:startCol + image.shape[1]]
 
     @staticmethod
     def _computeFanMask(sizeX, sizeY, spacingX, spacingY, viewAngleDeg, minRangeMm, maxRangeMm, depthOffsetMm=0.0):
