@@ -77,6 +77,10 @@ class ICESimParameterNode:
         rendered; pixels closer than this are set to zero.
     maxRangeMm - Maximum radial distance (mm) from the fan's apex that is
         rendered; pixels farther than this are set to zero.
+    imageContrastMode - "Ultrasound": render simulated grayscale
+        ultrasound tissue/blood intensities with speckle noise (default).
+        "Segmentation": fill the blood pool with a flat label value and
+        everything else with zero, with no noise added.
     matrixSizeX - Number of pixels of the simulated image along X.
     matrixSizeY - Number of pixels of the simulated image along Y.
     pixelSpacingX - Pixel spacing of the simulated image along X (mm).
@@ -89,6 +93,7 @@ class ICESimParameterNode:
     viewAngleDeg: Annotated[float, WithinRange(1.0, 179.0)] = 90.0
     minRangeMm: Annotated[float, WithinRange(0.0, 1000.0)] = 0.0
     maxRangeMm: Annotated[float, WithinRange(0.0, 1000.0)] = 200.0
+    imageContrastMode: str = "Ultrasound"
     matrixSizeX: Annotated[int, WithinRange(16, 1024)] = 256
     matrixSizeY: Annotated[int, WithinRange(16, 1024)] = 256
     pixelSpacingX: Annotated[float, WithinRange(0.01, 10.0)] = 0.5
@@ -154,6 +159,8 @@ class ICESimWidget(ScriptedLoadableModuleWidget, VTKObservationMixin):
             "valueChanged(double)", self.onPixelSpacingXChanged)
         self.ui.pixelSpacingY.connect(
             "valueChanged(double)", self.onPixelSpacingYChanged)
+        self.ui.imageContrastMode.connect(
+            "currentTextChanged(QString)", self.onImageContrastModeChanged)
 
         self.initializeParameterNode()
 
@@ -198,6 +205,7 @@ class ICESimWidget(ScriptedLoadableModuleWidget, VTKObservationMixin):
             self.ui.matrixSizeY.setValue(self._parameterNode.matrixSizeY)
             self.ui.pixelSpacingX.setValue(self._parameterNode.pixelSpacingX)
             self.ui.pixelSpacingY.setValue(self._parameterNode.pixelSpacingY)
+            self.ui.imageContrastMode.setCurrentText(self._parameterNode.imageContrastMode)
             self._setObservedTransformNode(self._parameterNode.imagingPlaneTransform)
         else:
             self._setObservedTransformNode(None)
@@ -277,6 +285,10 @@ class ICESimWidget(ScriptedLoadableModuleWidget, VTKObservationMixin):
         if self._parameterNode:
             self._parameterNode.pixelSpacingY = value
 
+    def onImageContrastModeChanged(self, text):
+        if self._parameterNode:
+            self._parameterNode.imageContrastMode = text
+
     def onApplyButton(self):
         with slicer.util.tryWithErrorDisplay(_("Failed to compute results."), waitCursor=True):
             self.logic.process(self._parameterNode)
@@ -311,6 +323,10 @@ class ICESimLogic(ScriptedLoadableModuleLogic):
     # coarser than axial, so grains are wider than they are tall.
     SPECKLE_SIGMA_AXIAL_PX = 0.8
     SPECKLE_SIGMA_LATERAL_PX = 1.8
+
+    # Flat label values used in "Segmentation" image contrast mode.
+    SEGMENTATION_BLOOD_VALUE = 1
+    SEGMENTATION_TISSUE_VALUE = 0
 
     def process(self, parameterNode: ICESimParameterNode):
         """Generate the simulated ICE image.
@@ -349,7 +365,10 @@ class ICESimLogic(ScriptedLoadableModuleLogic):
             parameterNode.scanPlaneOrientation)
         bloodPoolMask = self._resliceSegmentationToPlane(
             parameterNode.inputSegmentation, ijkToRAS, sizeX, sizeY)
-        imageArray = self._renderUltrasoundImage(bloodPoolMask)
+        if parameterNode.imageContrastMode == "Segmentation":
+            imageArray = self._renderSegmentationImage(bloodPoolMask)
+        else:
+            imageArray = self._renderUltrasoundImage(bloodPoolMask)
         fanMask = self._computeFanMask(
             sizeX, sizeY, spacingX, spacingY, viewAngleDeg, minRangeMm, maxRangeMm, depthOffsetMm)
         imageArray[~fanMask] = 0
@@ -475,6 +494,14 @@ class ICESimLogic(ScriptedLoadableModuleLogic):
             return maskArray != 0
         finally:
             slicer.mrmlScene.RemoveNode(labelmapVolumeNode)
+
+    @classmethod
+    def _renderSegmentationImage(cls, bloodPoolMask):
+        """Render a flat label image: SEGMENTATION_BLOOD_VALUE within the
+        blood pool, SEGMENTATION_TISSUE_VALUE elsewhere, with no noise.
+        """
+        image = np.where(bloodPoolMask, cls.SEGMENTATION_BLOOD_VALUE, cls.SEGMENTATION_TISSUE_VALUE)
+        return image.astype(np.uint8)
 
     @classmethod
     def _renderUltrasoundImage(cls, bloodPoolMask):

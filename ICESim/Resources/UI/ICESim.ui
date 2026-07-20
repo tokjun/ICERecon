@@ -262,6 +262,39 @@
     </widget>
    </item>
    <item>
+    <widget class="ctkCollapsibleButton" name="imageContrastCollapsibleButton">
+     <property name="text">
+      <string>Image Contrast</string>
+     </property>
+     <layout class="QFormLayout" name="imageContrastFormLayout">
+      <item row="0" column="0">
+       <widget class="QLabel" name="imageContrastModeLabel">
+        <property name="text">
+         <string>Mode:</string>
+        </property>
+       </widget>
+      </item>
+      <item row="0" column="1">
+       <widget class="QComboBox" name="imageContrastMode">
+        <property name="toolTip">
+         <string>Ultrasound: simulated grayscale ultrasound tissue/blood intensities with speckle noise. Segmentation: flat label image (blood pool filled with a fixed value, everything else zero), with no noise.</string>
+        </property>
+        <item>
+         <property name="text">
+          <string>Ultrasound</string>
+         </property>
+        </item>
+        <item>
+         <property name="text">
+          <string>Segmentation</string>
+         </property>
+        </item>
+       </widget>
+      </item>
+     </layout>
+    </widget>
+   </item>
+   <item>
     <widget class="ctkCollapsibleButton" name="outputsCollapsibleButton">
      <property name="text">
       <string>Output</string>
