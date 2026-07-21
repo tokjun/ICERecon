@@ -297,39 +297,6 @@
     </widget>
    </item>
    <item>
-    <widget class="ctkCollapsibleButton" name="imageContrastCollapsibleButton">
-     <property name="text">
-      <string>Image Contrast</string>
-     </property>
-     <layout class="QFormLayout" name="imageContrastFormLayout">
-      <item row="0" column="0">
-       <widget class="QLabel" name="imageContrastModeLabel">
-        <property name="text">
-         <string>Mode:</string>
-        </property>
-       </widget>
-      </item>
-      <item row="0" column="1">
-       <widget class="QComboBox" name="imageContrastMode">
-        <property name="toolTip">
-         <string>Ultrasound: simulated grayscale ultrasound tissue/blood intensities with speckle noise. Segmentation: label image where each structure keeps its own exported label value (0 = background), with no noise.</string>
-        </property>
-        <item>
-         <property name="text">
-          <string>Ultrasound</string>
-         </property>
-        </item>
-        <item>
-         <property name="text">
-          <string>Segmentation</string>
-         </property>
-        </item>
-       </widget>
-      </item>
-     </layout>
-    </widget>
-   </item>
-   <item>
     <widget class="ctkCollapsibleButton" name="outputsCollapsibleButton">
      <property name="text">
       <string>Output</string>
@@ -362,7 +329,39 @@
          <bool>true</bool>
         </property>
         <property name="toolTip">
-         <string>Output scalar volume node that will hold the simulated ICE image.</string>
+         <string>Output scalar volume node that will hold the simulated ultrasound image. Optional if Output segmentation is set.</string>
+        </property>
+       </widget>
+      </item>
+      <item row="1" column="0">
+       <widget class="QLabel" name="outputSegmentationLabel">
+        <property name="text">
+         <string>Output segmentation:</string>
+        </property>
+       </widget>
+      </item>
+      <item row="1" column="1">
+       <widget class="qMRMLNodeComboBox" name="outputSegmentation">
+        <property name="nodeTypes">
+         <stringlist>
+          <string>vtkMRMLLabelMapVolumeNode</string>
+          <string>vtkMRMLScalarVolumeNode</string>
+         </stringlist>
+        </property>
+        <property name="noneEnabled">
+         <bool>true</bool>
+        </property>
+        <property name="addEnabled">
+         <bool>true</bool>
+        </property>
+        <property name="removeEnabled">
+         <bool>true</bool>
+        </property>
+        <property name="renameEnabled">
+         <bool>true</bool>
+        </property>
+        <property name="toolTip">
+         <string>Output volume where each structure in the segmentation keeps its own exported label value (0 = background), with no noise. Same cross-section as Output volume. Can be a label map volume (automatic per-label color display) or a plain scalar volume (e.g. for OpenIGTLink compatibility). Optional if Output volume is set.</string>
         </property>
        </widget>
       </item>
@@ -436,6 +435,12 @@
    <sender>ICESim</sender>
    <signal>mrmlSceneChanged(vtkMRMLScene*)</signal>
    <receiver>outputVolume</receiver>
+   <slot>setMRMLScene(vtkMRMLScene*)</slot>
+  </connection>
+  <connection>
+   <sender>ICESim</sender>
+   <signal>mrmlSceneChanged(vtkMRMLScene*)</signal>
+   <receiver>outputSegmentation</receiver>
    <slot>setMRMLScene(vtkMRMLScene*)</slot>
   </connection>
  </connections>

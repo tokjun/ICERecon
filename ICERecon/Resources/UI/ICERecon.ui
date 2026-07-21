@@ -94,6 +94,32 @@
         </property>
        </widget>
       </item>
+      <item row="3" column="0">
+       <widget class="QLabel" name="paintingThicknessMmLabel">
+        <property name="text">
+         <string>Painting thickness (mm):</string>
+        </property>
+       </widget>
+      </item>
+      <item row="3" column="1">
+       <widget class="QDoubleSpinBox" name="paintingThicknessMm">
+        <property name="toolTip">
+         <string>How far from the input slice (along its own normal) a voxel can be and still get painted, independent of the input's native slice thickness. Increase this if the input moves in large steps between updates (e.g. a fast probe sweep), which would otherwise leave gaps between painted slabs.</string>
+        </property>
+        <property name="decimals">
+         <number>2</number>
+        </property>
+        <property name="minimum">
+         <double>0.010000000000000</double>
+        </property>
+        <property name="maximum">
+         <double>50.000000000000000</double>
+        </property>
+        <property name="value">
+         <double>1.000000000000000</double>
+        </property>
+       </widget>
+      </item>
      </layout>
     </widget>
    </item>

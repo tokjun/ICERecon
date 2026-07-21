@@ -68,12 +68,19 @@ class ICEReconParameterNode:
         painting them into the output volume (clipped to the output's valid
         range). Applies to subsequent paints only, not retroactively to
         voxels already painted.
+    paintingThicknessMm - How far (mm) along the input slice's own normal
+        (thickness) axis a voxel can be from the slice and still get
+        painted, independent of the input's native slice thickness.
+        Increase this if the input moves in large steps between updates
+        (e.g. a fast probe sweep), which would otherwise leave gaps between
+        painted slabs.
     """
     inputVolume: vtkMRMLScalarVolumeNode
     outputVolume: vtkMRMLScalarVolumeNode
     boundingBox: vtkMRMLMarkupsROINode
     outputSpacingMm: Annotated[float, WithinRange(0.05, 10.0)] = 1.0
     intensityScale: Annotated[float, WithinRange(0.01, 10.0)] = 1.0
+    paintingThicknessMm: Annotated[float, WithinRange(0.01, 50.0)] = 1.0
 
 
 #
@@ -122,6 +129,8 @@ class ICEReconWidget(ScriptedLoadableModuleWidget, VTKObservationMixin):
             "valueChanged(double)", self.onOutputSpacingMmChanged)
         self.ui.intensityScale.connect(
             "valueChanged(double)", self.onIntensityScaleChanged)
+        self.ui.paintingThicknessMm.connect(
+            "valueChanged(double)", self.onPaintingThicknessMmChanged)
 
         self.initializeParameterNode()
 
@@ -157,6 +166,7 @@ class ICEReconWidget(ScriptedLoadableModuleWidget, VTKObservationMixin):
             self.ui.boundingBox.setCurrentNode(self._parameterNode.boundingBox)
             self.ui.outputSpacingMm.setValue(self._parameterNode.outputSpacingMm)
             self.ui.intensityScale.setValue(self._parameterNode.intensityScale)
+            self.ui.paintingThicknessMm.setValue(self._parameterNode.paintingThicknessMm)
             self._setObservedInputVolumeNode(self._parameterNode.inputVolume)
         else:
             self._setObservedInputVolumeNode(None)
@@ -199,7 +209,7 @@ class ICEReconWidget(ScriptedLoadableModuleWidget, VTKObservationMixin):
         try:
             self.logic.paint(
                 self._parameterNode.inputVolume, self._parameterNode.outputVolume,
-                self._parameterNode.intensityScale)
+                self._parameterNode.intensityScale, self._parameterNode.paintingThicknessMm)
         except Exception as e:
             logging.error(f"ICERecon: automatic paint failed: {e}")
 
@@ -224,6 +234,10 @@ class ICEReconWidget(ScriptedLoadableModuleWidget, VTKObservationMixin):
         if self._parameterNode:
             self._parameterNode.intensityScale = value
 
+    def onPaintingThicknessMmChanged(self, value):
+        if self._parameterNode:
+            self._parameterNode.paintingThicknessMm = value
+
     def onInitializeButton(self):
         with slicer.util.tryWithErrorDisplay(_("Failed to initialize output volume."), waitCursor=True):
             self.logic.initializeOutputVolume(
@@ -238,7 +252,7 @@ class ICEReconWidget(ScriptedLoadableModuleWidget, VTKObservationMixin):
         with slicer.util.tryWithErrorDisplay(_("Failed to paint output volume."), waitCursor=True):
             self.logic.paint(
                 self._parameterNode.inputVolume, self._parameterNode.outputVolume,
-                self._parameterNode.intensityScale)
+                self._parameterNode.intensityScale, self._parameterNode.paintingThicknessMm)
 
 
 #
@@ -291,12 +305,15 @@ class ICEReconLogic(ScriptedLoadableModuleLogic):
 
         logging.info(f"ICERecon: initialized output volume, dimensions={dims}, spacing={spacingMm}mm")
 
-    def paint(self, inputVolumeNode, outputVolumeNode, intensityScale=1.0):
+    def paint(self, inputVolumeNode, outputVolumeNode, intensityScale=1.0, paintingThicknessMm=1.0):
         """Paint the region of outputVolumeNode currently overlapped by
         inputVolumeNode with inputVolumeNode's pixel values times
         intensityScale, clipped to the output's valid range (last-write-wins,
         no blending). Voxels outside the input's current extent are left
         unchanged, so the reconstruction accumulates as the input moves.
+        paintingThicknessMm controls how far from the input slice (along its
+        own normal) a voxel can be and still count as "current extent" --
+        see the note in _computeThickenedResliceAxes.
         """
         if not inputVolumeNode:
             raise ValueError("Input volume is not set.")
@@ -334,6 +351,7 @@ class ICEReconLogic(ScriptedLoadableModuleLogic):
         # Maps output IJK -> input IJK.
         resliceAxes = vtk.vtkMatrix4x4()
         vtk.vtkMatrix4x4.Multiply4x4(inputWorldToIJK, outputIJKToRAS, resliceAxes)
+        self._thickenResliceAxes(resliceAxes, inputIJKToWorld, paintingThicknessMm)
 
         dims = outputImageData.GetDimensions()
 
@@ -354,6 +372,36 @@ class ICEReconLogic(ScriptedLoadableModuleLogic):
             scaledData = np.clip(scaledData, valueRange.min, valueRange.max)
         outputArray[hit] = scaledData[hit].astype(outputArray.dtype)
         slicer.util.arrayFromVolumeModified(outputVolumeNode)
+
+    @staticmethod
+    def _thickenResliceAxes(resliceAxes, inputIJKToWorld, paintingThicknessMm):
+        """Widen (or narrow) resliceAxes' tolerance along the input's own K
+        axis (its slice-normal/thickness direction) in place, so a voxel is
+        accepted as "on the slice" within +/- paintingThicknessMm/2 of it,
+        independent of the input's native slice thickness.
+
+        vtkImageReslice normally only accepts output voxels whose computed
+        input-K coordinate rounds to a valid input slice index -- for a
+        single-slice input that means within about +/- half of its own
+        native K spacing (nativeThicknessMm, the length of the K column of
+        inputIJKToWorld) of the plane. Row 2 of resliceAxes is exactly the
+        (input-I, input-J, input-K, 1) -> input-K coefficients for a given
+        output voxel, i.e. how far "off-plane" that voxel is, in input-K
+        units; scaling that row down makes a given real-world distance from
+        the plane correspond to a smaller input-K deviation, so it takes
+        more real-world distance to fall outside the valid range -- i.e.
+        widens the accepted slab. Scaling up narrows it, symmetrically.
+        Only row 2 is touched, so the in-plane (I/J) footprint test that
+        determines whether a voxel falls within the image's rectangular
+        extent is unaffected.
+        """
+        kAxisMm = [inputIJKToWorld.GetElement(r, 2) for r in range(3)]
+        nativeThicknessMm = math.sqrt(sum(c * c for c in kAxisMm))
+        if nativeThicknessMm <= 0 or paintingThicknessMm <= 0:
+            return
+        thicknessScale = nativeThicknessMm / paintingThicknessMm
+        for c in range(4):
+            resliceAxes.SetElement(2, c, resliceAxes.GetElement(2, c) * thicknessScale)
 
     @staticmethod
     def _resliceToOutputGrid(imageData, resliceAxes, dims):

@@ -77,10 +77,6 @@ class ICESimParameterNode:
         rendered; pixels closer than this are set to zero.
     maxRangeMm - Maximum radial distance (mm) from the fan's apex that is
         rendered; pixels farther than this are set to zero.
-    imageContrastMode - "Ultrasound": render simulated grayscale
-        ultrasound tissue/blood intensities with speckle noise (default).
-        "Segmentation": each structure in the segmentation keeps its own
-        exported label value (0 = background), with no noise added.
     sweepAngleDeg - Rotation (degrees) of the imaging plane about the
         catheter axis (the imagingPlaneTransform's third column vector),
         applied on top of that transform without modifying it. Lets the
@@ -91,7 +87,17 @@ class ICESimParameterNode:
     matrixSizeY - Number of pixels of the simulated image along Y.
     pixelSpacingX - Pixel spacing of the simulated image along X (mm).
     pixelSpacingY - Pixel spacing of the simulated image along Y (mm).
-    outputVolume - The simulated ICE image.
+    outputVolume - The simulated grayscale ultrasound image, with speckle
+        noise. Optional if outputSegmentation is set.
+    outputSegmentation - Each structure in the segmentation keeps its own
+        exported label value (0 = background), with no noise added -- the
+        same cross-section as outputVolume, just rendered as clean labels
+        instead of simulated ultrasound. Can be either a
+        vtkMRMLLabelMapVolumeNode (gets automatic per-label color display)
+        or a plain vtkMRMLScalarVolumeNode (e.g. for OpenIGTLink
+        compatibility, which doesn't handle label map volumes). Optional if
+        outputVolume is set. Both outputs, if set, are generated on every
+        Apply/auto-update, from the same geometry.
     """
     inputSegmentation: vtkMRMLSegmentationNode
     imagingPlaneTransform: vtkMRMLLinearTransformNode
@@ -99,13 +105,13 @@ class ICESimParameterNode:
     viewAngleDeg: Annotated[float, WithinRange(1.0, 179.0)] = 90.0
     minRangeMm: Annotated[float, WithinRange(0.0, 1000.0)] = 0.0
     maxRangeMm: Annotated[float, WithinRange(0.0, 1000.0)] = 200.0
-    imageContrastMode: str = "Ultrasound"
     sweepAngleDeg: Annotated[float, WithinRange(-180.0, 180.0)] = 0.0
     matrixSizeX: Annotated[int, WithinRange(16, 1024)] = 256
     matrixSizeY: Annotated[int, WithinRange(16, 1024)] = 256
     pixelSpacingX: Annotated[float, WithinRange(0.01, 10.0)] = 0.5
     pixelSpacingY: Annotated[float, WithinRange(0.01, 10.0)] = 0.5
     outputVolume: vtkMRMLScalarVolumeNode
+    outputSegmentation: vtkMRMLScalarVolumeNode
 
 
 #
@@ -150,6 +156,8 @@ class ICESimWidget(ScriptedLoadableModuleWidget, VTKObservationMixin):
             "currentNodeChanged(vtkMRMLNode*)", self.onImagingPlaneTransformChanged)
         self.ui.outputVolume.connect(
             "currentNodeChanged(vtkMRMLNode*)", self.onOutputVolumeChanged)
+        self.ui.outputSegmentation.connect(
+            "currentNodeChanged(vtkMRMLNode*)", self.onOutputSegmentationChanged)
         self.ui.scanPlaneOrientation.connect(
             "currentTextChanged(QString)", self.onScanPlaneOrientationChanged)
         self.ui.viewAngleDeg.connect(
@@ -166,8 +174,6 @@ class ICESimWidget(ScriptedLoadableModuleWidget, VTKObservationMixin):
             "valueChanged(double)", self.onPixelSpacingXChanged)
         self.ui.pixelSpacingY.connect(
             "valueChanged(double)", self.onPixelSpacingYChanged)
-        self.ui.imageContrastMode.connect(
-            "currentTextChanged(QString)", self.onImageContrastModeChanged)
         self.ui.sweepAngleDeg.connect(
             "valueChanged(double)", self.onSweepAngleDegChanged)
 
@@ -206,6 +212,7 @@ class ICESimWidget(ScriptedLoadableModuleWidget, VTKObservationMixin):
             self.ui.inputSegmentation.setCurrentNode(self._parameterNode.inputSegmentation)
             self.ui.imagingPlaneTransform.setCurrentNode(self._parameterNode.imagingPlaneTransform)
             self.ui.outputVolume.setCurrentNode(self._parameterNode.outputVolume)
+            self.ui.outputSegmentation.setCurrentNode(self._parameterNode.outputSegmentation)
             self.ui.scanPlaneOrientation.setCurrentText(self._parameterNode.scanPlaneOrientation)
             self.ui.viewAngleDeg.setValue(self._parameterNode.viewAngleDeg)
             self.ui.minRangeMm.setValue(self._parameterNode.minRangeMm)
@@ -214,7 +221,6 @@ class ICESimWidget(ScriptedLoadableModuleWidget, VTKObservationMixin):
             self.ui.matrixSizeY.setValue(self._parameterNode.matrixSizeY)
             self.ui.pixelSpacingX.setValue(self._parameterNode.pixelSpacingX)
             self.ui.pixelSpacingY.setValue(self._parameterNode.pixelSpacingY)
-            self.ui.imageContrastMode.setCurrentText(self._parameterNode.imageContrastMode)
             self.ui.sweepAngleDeg.setValue(self._parameterNode.sweepAngleDeg)
             self._setObservedTransformNode(self._parameterNode.imagingPlaneTransform)
         else:
@@ -243,7 +249,7 @@ class ICESimWidget(ScriptedLoadableModuleWidget, VTKObservationMixin):
             return
         if not (self._parameterNode.inputSegmentation
                 and self._parameterNode.imagingPlaneTransform
-                and self._parameterNode.outputVolume):
+                and (self._parameterNode.outputVolume or self._parameterNode.outputSegmentation)):
             return
         try:
             self.logic.process(self._parameterNode)
@@ -262,6 +268,10 @@ class ICESimWidget(ScriptedLoadableModuleWidget, VTKObservationMixin):
     def onOutputVolumeChanged(self, node):
         if self._parameterNode:
             self._parameterNode.outputVolume = node
+
+    def onOutputSegmentationChanged(self, node):
+        if self._parameterNode:
+            self._parameterNode.outputSegmentation = node
 
     def onScanPlaneOrientationChanged(self, text):
         if self._parameterNode:
@@ -294,10 +304,6 @@ class ICESimWidget(ScriptedLoadableModuleWidget, VTKObservationMixin):
     def onPixelSpacingYChanged(self, value):
         if self._parameterNode:
             self._parameterNode.pixelSpacingY = value
-
-    def onImageContrastModeChanged(self, text):
-        if self._parameterNode:
-            self._parameterNode.imageContrastMode = text
 
     def onSweepAngleDegChanged(self, value):
         if self._parameterNode:
@@ -342,18 +348,21 @@ class ICESimLogic(ScriptedLoadableModuleLogic):
     SPECKLE_SIGMA_LATERAL_PX = 1.8
 
     def process(self, parameterNode: ICESimParameterNode):
-        """Generate the simulated ICE image.
+        """Generate the simulated ICE image(s).
 
         Takes the cross section of the input segmentation along the imaging
-        plane and renders a simulated ultrasound image (dark blood pool,
-        bright tissue, with added noise).
+        plane and, for each output that is set, renders it: outputVolume
+        gets a simulated ultrasound image (dark blood pool, bright tissue,
+        with added noise); outputSegmentation gets the same cross-section
+        as clean per-structure labels, with no noise. Both are generated
+        from the same geometry whenever both are set.
         """
         if not parameterNode.inputSegmentation:
             raise ValueError("Input segmentation is not set.")
         if not parameterNode.imagingPlaneTransform:
             raise ValueError("Imaging plane transform is not set.")
-        if not parameterNode.outputVolume:
-            raise ValueError("Output volume is not set.")
+        if not (parameterNode.outputVolume or parameterNode.outputSegmentation):
+            raise ValueError("At least one of Output volume or Output segmentation must be set.")
 
         sizeX = parameterNode.matrixSizeX
         sizeY = parameterNode.matrixSizeY
@@ -378,15 +387,19 @@ class ICESimLogic(ScriptedLoadableModuleLogic):
             parameterNode.scanPlaneOrientation, parameterNode.sweepAngleDeg)
         labelArray = self._resliceSegmentationToPlane(
             parameterNode.inputSegmentation, ijkToRAS, sizeX, sizeY)
-        if parameterNode.imageContrastMode == "Segmentation":
-            imageArray = self._renderSegmentationImage(labelArray)
-        else:
-            bloodPoolMask = labelArray != 0
-            imageArray = self._renderUltrasoundImage(bloodPoolMask)
         fanMask = self._computeFanMask(
             sizeX, sizeY, spacingX, spacingY, viewAngleDeg, minRangeMm, maxRangeMm, depthOffsetMm)
-        imageArray[~fanMask] = 0
-        self._updateOutputVolume(parameterNode.outputVolume, imageArray, ijkToRAS)
+
+        if parameterNode.outputVolume:
+            bloodPoolMask = labelArray != 0
+            imageArray = self._renderUltrasoundImage(bloodPoolMask)
+            imageArray[~fanMask] = 0
+            self._updateOutputVolume(parameterNode.outputVolume, imageArray, ijkToRAS)
+
+        if parameterNode.outputSegmentation:
+            segmentationArray = self._renderSegmentationImage(labelArray)
+            segmentationArray[~fanMask] = 0
+            self._updateOutputVolume(parameterNode.outputSegmentation, segmentationArray, ijkToRAS)
 
         logging.info(f"ICESim processing completed in {time.time() - startTime:.2f} seconds")
 
@@ -623,7 +636,10 @@ class ICESimLogic(ScriptedLoadableModuleLogic):
 
         outputVolumeNode.CreateDefaultDisplayNodes()
         displayNode = outputVolumeNode.GetDisplayNode()
-        if displayNode:
+        # Label map display nodes (if outputSegmentation is a
+        # vtkMRMLLabelMapVolumeNode) have no window/level concept; only
+        # apply this to scalar volume displays.
+        if displayNode and hasattr(displayNode, "SetAutoWindowLevel"):
             displayNode.SetAutoWindowLevel(True)
 
 
